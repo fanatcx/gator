@@ -1,4 +1,4 @@
-package config
+package config	
 
 import (
 	"encoding/json"
@@ -11,6 +11,8 @@ type Config struct {
 	CurrentUserName string `json:"currentUserName"`
 }
 
+
+
 func GetConfigPath() (string, error) {
 	homeDirectory, err := os.UserHomeDir() 
 	if err != nil {
@@ -18,6 +20,8 @@ func GetConfigPath() (string, error) {
 	}
 	return homeDirectory + "/gatorconfig.json", nil
 }
+
+
 
 // Returns a nil Config object if failure
 func Read() (cfg Config, err error) {
