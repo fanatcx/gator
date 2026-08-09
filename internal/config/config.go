@@ -18,7 +18,7 @@ func GetConfigPath() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return homeDirectory + "/gatorconfig.json", nil
+	return homeDirectory + "/.gatorconfig.json", nil
 }
 
 
