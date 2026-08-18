@@ -84,6 +84,15 @@ func handlerRegister(s *state, cmd command) error {
 	return errors.New("user already exists")
 }
 
+func handlerReset(s *state, cmd command) error {
+	if err := s.db.DeleteUsers(context.Background()); err != nil {
+		fmt.Print("failed to reset database: ")
+		return err
+	}
+	fmt.Println("database has been successfully reset.")
+	return nil
+}
+
 type commands struct {
 	command map[string]func(*state, command) error
 }
@@ -134,6 +143,7 @@ func main() {
 	// handler
 	cmds.register("login", handlerLogin)
 	cmds.register("register", handlerRegister)
+	cmds.register("reset", handlerReset)
 	cmd := command{
 		name:      os.Args[1],  // command name
 		arguments: os.Args[2:], // rest of the arguments, if any
