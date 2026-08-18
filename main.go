@@ -6,6 +6,7 @@ import (
 	"encoding/xml"
 	"errors"
 	"fmt"
+	"html"
 	"io"
 	"net/http"
 	"os"
@@ -15,7 +16,6 @@ import (
 	"github.com/fanatcx/gator/internal/database"
 	"github.com/google/uuid"
 
-	//uuid generator
 	_ "github.com/lib/pq"
 )
 
@@ -35,24 +35,35 @@ type command struct {
 
 func handlerLogin(s *state, cmd command) error {
 	if len(cmd.arguments) < 1 {
-		return errors.New("the login handler expects a username argument.")
+		return errors.New("the login handler expects a username argument")
 	}
 	_, err := s.db.GetUser(context.Background(), cmd.arguments[0])
 	if err != nil {
-		return errors.New("user does not exist.")
+		return errors.New("user does not exist")
 	}
 
 	if err = s.cfg.SetUser(cmd.arguments[0]); err != nil {
-		return fmt.Errorf("Could not set user: %w", err)
+		return fmt.Errorf("could not set user: %w", err)
 	}
 
-	fmt.Println("User is logged in sucessfully.")
+	fmt.Println("User is logged in successfully.")
+	return nil
+}
+func handlerAggregator(s *state, cmd command) error {
+	url := "https://www.wagslane.dev/index.xml"
+	rss, err := fetchFeed(context.Background(), url)
+	if err != nil {
+		return err
+	}
+
+	fmt.Println(rss)
+
 	return nil
 }
 
 func handlerRegister(s *state, cmd command) error {
 	if len(cmd.arguments) == 0 {
-		return errors.New("username not supplied as an argument after command.")
+		return errors.New("username not supplied as an argument after command")
 	}
 
 	// check if user exists ->
@@ -75,7 +86,7 @@ func handlerRegister(s *state, cmd command) error {
 			return err
 		}
 
-		fmt.Printf("user: '%v' created successfully at %v and updated at %v. Current uuid: %v",
+		fmt.Printf("user: '%v' created successfully at %v and updated at %v. Current uuid: %v\n",
 			u.Name,
 			u.CreatedAt,
 			u.UpdatedAt,
@@ -89,22 +100,20 @@ func handlerRegister(s *state, cmd command) error {
 
 func handlerReset(s *state, cmd command) error {
 	if err := s.db.DeleteUsers(context.Background()); err != nil {
-		fmt.Print("failed to reset database: ")
-		return err
+		return fmt.Errorf("resetting database: %w", err)
 	}
 
-	fmt.Println("database has been successfully reset.")
+	fmt.Println("database has been successfully reset")
 
 	return nil
 }
 
 func handlerUsers(s *state, cmd command) error {
 	users, err := s.db.GetUsers(context.Background())
-	if err != nil {
-		fmt.Print("unable to retrieve users: ")
-		return err
-	}
 
+	if err != nil {
+		return fmt.Errorf("unable to retrieve users: %w", err)
+	}
 	for _, u := range users {
 		if s.cfg.CurrentUserName == u {
 			fmt.Printf("%s (current)\n", u)
@@ -124,7 +133,7 @@ type commands struct {
 func (c *commands) run(s *state, cmd command) error {
 	valFunc, exists := c.command[cmd.name]
 	if !exists {
-		return errors.New("failed to run command, command does not exist.")
+		return errors.New("failed to run command, command does not exist")
 	}
 
 	if err := valFunc(s, cmd); err != nil {
@@ -156,34 +165,42 @@ type RSSItem struct {
 
 func fetchFeed(ctx context.Context, feedURL string) (*RSSFeed, error) {
 	var rss RSSFeed
-	var client http.Client
+	client := http.Client{Timeout: 30 * time.Second}
 
 	req, err := http.NewRequestWithContext(ctx, "GET", feedURL, nil)
 	if err != nil {
-		return &rss, err
+		return nil, err
 	}
 	req.Header.Set("User-Agent", "gator")
 	res, err := client.Do(req)
 	if err != nil {
-		return &rss, fmt.Errorf("client failed the request: %w", err)
+		return nil, fmt.Errorf("client failed the request: %w", err)
 	}
+
 	defer res.Body.Close()
 
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
-		return &rss, fmt.Errorf("fetching %s: %s", feedURL, res.Status)
+		return nil, fmt.Errorf("fetching %s: %s", feedURL, res.Status)
 	}
 
 	data, err := io.ReadAll(res.Body)
 	if err != nil {
-		return &rss, fmt.Errorf("unable to read response body: %w", err)
+		return nil, fmt.Errorf("unable to read response body: %w", err)
 	}
+
 	// data->struct
 	if err := xml.Unmarshal(data, &rss); err != nil {
-		return &rss, fmt.Errorf("could not unmarshal: %w", err)
+		return nil, fmt.Errorf("could not unmarshal: %w", err)
 	}
 
+	// unescape
+	rss.Channel.Title = html.UnescapeString(rss.Channel.Title)
+	rss.Channel.Description = html.UnescapeString(rss.Channel.Description)
+	for i, item := range rss.Channel.Item {
+		rss.Channel.Item[i].Title = html.UnescapeString(item.Title)
+		rss.Channel.Item[i].Description = html.UnescapeString(item.Description)
+	}
 	return &rss, nil
-
 }
 
 func main() {
@@ -192,7 +209,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	var stateST state
+	var s state
 
 	// read from json on disk. returns config object or error
 	cfg, err := config.Read()
@@ -200,12 +217,20 @@ func main() {
 		fmt.Printf("%v", err)
 		os.Exit(1)
 	}
-	stateST.cfg = &cfg
-	db, err := sql.Open("postgres", stateST.cfg.DbURL)
+	s.cfg = &cfg
+	db, err := sql.Open("postgres", s.cfg.DbURL)
+	if err != nil {
+		fmt.Printf("%v\n", err)
+		os.Exit(1)
+	}
 
-	// A pointer to queries?
+	if err := db.Ping(); err != nil {
+		fmt.Printf("unable to ping the server: %v\n", err)
+		os.Exit(1)
+	}
+
 	dbQueries := database.New(db)
-	stateST.db = dbQueries
+	s.db = dbQueries
 
 	// create the commands
 	cmds := commands{
@@ -216,14 +241,16 @@ func main() {
 	cmds.register("register", handlerRegister)
 	cmds.register("reset", handlerReset)
 	cmds.register("users", handlerUsers)
+	cmds.register("agg", handlerAggregator)
+
 	cmd := command{
 		name:      os.Args[1],  // command name
 		arguments: os.Args[2:], // rest of the arguments, if any
 	}
 
-	// self note: returns an error if failed to run a command through a handler
-	if err := cmds.run(&stateST, cmd); err != nil {
-		fmt.Printf("%v\n", err)
+	if err := cmds.run(&s, cmd); err != nil {
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+
 }
