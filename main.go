@@ -93,6 +93,22 @@ func handlerReset(s *state, cmd command) error {
 	return nil
 }
 
+func handlerUsers(s *state, cmd command) error {
+	users, err := s.db.GetUsers(context.Background())
+	if err != nil {
+		fmt.Print("unable to retrieve users: ")
+		return err
+	}
+	for _, u := range users {
+		if s.cfg.CurrentUserName == u {
+			fmt.Printf("%s (current)\n", u)
+			continue
+		}
+		fmt.Println(u)
+	}
+	return nil
+}
+
 type commands struct {
 	command map[string]func(*state, command) error
 }
@@ -144,6 +160,7 @@ func main() {
 	cmds.register("login", handlerLogin)
 	cmds.register("register", handlerRegister)
 	cmds.register("reset", handlerReset)
+	cmds.register("users", handlerUsers)
 	cmd := command{
 		name:      os.Args[1],  // command name
 		arguments: os.Args[2:], // rest of the arguments, if any
