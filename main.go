@@ -186,6 +186,7 @@ func fetchFeed(ctx context.Context, feedURL string) (*RSSFeed, error) {
 	if err := xml.Unmarshal(data, &rss); err != nil {
 		return &rss, err
 	}
+	return &rss, nil
 
 }
 
