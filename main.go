@@ -3,8 +3,11 @@ package main
 import (
 	"context"
 	"database/sql"
+	"encoding/xml"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"time"
 
@@ -12,10 +15,11 @@ import (
 	"github.com/fanatcx/gator/internal/database"
 	"github.com/google/uuid"
 
+	//uuid generator
 	_ "github.com/lib/pq"
 )
 
-// We are importing for side effects, not really using it
+// importing pq for side effects
 
 type state struct {
 	cfg *config.Config
@@ -46,7 +50,6 @@ func handlerLogin(s *state, cmd command) error {
 	return nil
 }
 
-// needs to check for username (arg 2)
 func handlerRegister(s *state, cmd command) error {
 	if len(cmd.arguments) == 0 {
 		return errors.New("username not supplied as an argument after command.")
@@ -89,7 +92,9 @@ func handlerReset(s *state, cmd command) error {
 		fmt.Print("failed to reset database: ")
 		return err
 	}
+
 	fmt.Println("database has been successfully reset.")
+
 	return nil
 }
 
@@ -99,13 +104,16 @@ func handlerUsers(s *state, cmd command) error {
 		fmt.Print("unable to retrieve users: ")
 		return err
 	}
+
 	for _, u := range users {
 		if s.cfg.CurrentUserName == u {
 			fmt.Printf("%s (current)\n", u)
 			continue
 		}
+
 		fmt.Println(u)
 	}
+
 	return nil
 }
 
@@ -115,11 +123,10 @@ type commands struct {
 
 func (c *commands) run(s *state, cmd command) error {
 	valFunc, exists := c.command[cmd.name]
-
 	if !exists {
 		return errors.New("failed to run command, command does not exist.")
 	}
-	// run command, return err if not successful
+
 	if err := valFunc(s, cmd); err != nil {
 		return fmt.Errorf("error running command '%s': %w", cmd.name, err)
 	}
@@ -129,6 +136,57 @@ func (c *commands) run(s *state, cmd command) error {
 
 func (c *commands) register(name string, f func(*state, command) error) {
 	c.command[name] = f // assign to map
+}
+
+type RSSFeed struct {
+	Channel struct {
+		Title       string    `xml:"title"`
+		Link        string    `xml:"link"`
+		Description string    `xml:"description"`
+		Item        []RSSItem `xml:"item"`
+	} `xml:"channel"`
+}
+
+type RSSItem struct {
+	Title       string `xml:"title"`
+	Link        string `xml:"link"`
+	Description string `xml:"description"`
+	PubDate     string `xml:"pubDate"`
+}
+
+func fetchFeed(ctx context.Context, feedURL string) (*RSSFeed, error) {
+	var rss RSSFeed
+	var client http.Client
+
+	req, err := http.NewRequestWithContext(ctx, "GET", feedURL, nil)
+	if err != nil {
+		fmt.Print("failed to create request object: ")
+		return &rss, err
+	}
+	req.Header.Set("User-Agent", "gator")
+	res, err := client.Do(req)
+	defer res.Body.Close()
+
+	if err != nil {
+		fmt.Print("client failure: ")
+		return &rss, err
+	}
+	// status code failures
+	if res.StatusCode < 200 || res.StatusCode >= 300 {
+		return &rss, fmt.Errorf("fetching %s: %s", feedURL, res.Status)
+	}
+
+	data, err := io.ReadAll(res.Body)
+	if err != nil {
+		fmt.Print("fail to read request body: ")
+		return &rss, err
+	}
+
+	// data->struct
+	if err := xml.Unmarshal(data, &rss); err != nil {
+		return &rss, err
+	}
+
 }
 
 func main() {
