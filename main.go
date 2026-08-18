@@ -160,32 +160,28 @@ func fetchFeed(ctx context.Context, feedURL string) (*RSSFeed, error) {
 
 	req, err := http.NewRequestWithContext(ctx, "GET", feedURL, nil)
 	if err != nil {
-		fmt.Print("failed to create request object: ")
 		return &rss, err
 	}
 	req.Header.Set("User-Agent", "gator")
 	res, err := client.Do(req)
+	if err != nil {
+		return &rss, fmt.Errorf("client failed the request: %w", err)
+	}
 	defer res.Body.Close()
 
-	if err != nil {
-		fmt.Print("client failure: ")
-		return &rss, err
-	}
-	// status code failures
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
 		return &rss, fmt.Errorf("fetching %s: %s", feedURL, res.Status)
 	}
 
 	data, err := io.ReadAll(res.Body)
 	if err != nil {
-		fmt.Print("fail to read request body: ")
-		return &rss, err
+		return &rss, fmt.Errorf("unable to read response body: %w", err)
 	}
-
 	// data->struct
 	if err := xml.Unmarshal(data, &rss); err != nil {
-		return &rss, err
+		return &rss, fmt.Errorf("could not unmarshal: %w", err)
 	}
+
 	return &rss, nil
 
 }
