@@ -33,6 +33,42 @@ type command struct {
 	arguments []string
 }
 
+func addFeed(s *state, cmd command) error {
+	// check number of arguments
+	if len(cmd.arguments) == 2 {
+		var feedInfo database.CreateFeedParams
+
+		user, err := s.db.GetUser(context.Background(), s.cfg.CurrentUserName)
+		if err != nil {
+			return err
+		}
+
+		feedName := cmd.arguments[0]
+		url := cmd.arguments[1]
+		//rss, err := fetchFeed(context.Background(), url)
+
+		// NOTE: each "feed" has its own uuid auto generated
+		feedInfo.CreatedAt = time.Now()
+		feedInfo.Name = feedName
+		feedInfo.Url = url
+		feedInfo.UserID = user.ID
+		feedInfo.UpdatedAt = time.Now()
+
+		f, err := s.db.CreateFeed(context.Background(), feedInfo)
+		if err != nil {
+			return err
+		}
+
+		// print object to console
+		fmt.Printf("'%s'\n", f.Name)
+		fmt.Printf("'%s'\n", f.Url)
+		return nil
+
+	}
+	return errors.New("invalid amount of arguments passed to addfeed. Provide a name and url for the feed")
+
+}
+
 func handlerLogin(s *state, cmd command) error {
 	if len(cmd.arguments) < 1 {
 		return errors.New("the login handler expects a username argument")
@@ -49,6 +85,7 @@ func handlerLogin(s *state, cmd command) error {
 	fmt.Println("User is logged in successfully.")
 	return nil
 }
+
 func handlerAggregator(s *state, cmd command) error {
 	url := "https://www.wagslane.dev/index.xml"
 	rss, err := fetchFeed(context.Background(), url)
@@ -242,6 +279,7 @@ func main() {
 	cmds.register("reset", handlerReset)
 	cmds.register("users", handlerUsers)
 	cmds.register("agg", handlerAggregator)
+	cmds.register("addfeed", addFeed)
 
 	cmd := command{
 		name:      os.Args[1],  // command name
