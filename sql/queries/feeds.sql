@@ -8,3 +8,7 @@ VALUES (
     $5
 )
 RETURNING *;
+
+-- name: DisplayFeeds :many
+SELECT * FROM feeds
+ORDER BY created_at;

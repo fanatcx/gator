@@ -33,6 +33,32 @@ type command struct {
 	arguments []string
 }
 
+// displays all feeds
+func handlerFeeds(s *state, cmd command) error {
+	if len(cmd.arguments) == 0 {
+		f, err := s.db.DisplayFeeds(context.Background())
+		if err != nil {
+			return err
+		}
+		
+		for _, feed := range f {
+			u, err := s.db.GetUserById(context.Background(), feed.UserID)
+			if err != nil {
+				return err
+			}
+			fmt.Println(feed.Name)
+			fmt.Println(feed.Url)
+			fmt.Printf("created by user: %s\n", u.Name) // add feed user with sql 
+			fmt.Println("------")
+			
+		}
+		return nil
+		
+	}
+	return errors.New("invalid arguments passed! 'feeds' takes no aruguments")
+	
+}
+
 func addFeed(s *state, cmd command) error {
 	// check number of arguments
 	if len(cmd.arguments) == 2 {
@@ -240,6 +266,8 @@ func fetchFeed(ctx context.Context, feedURL string) (*RSSFeed, error) {
 	return &rss, nil
 }
 
+
+
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Println("Error, not enough arguments. Please type a command.")
@@ -280,6 +308,7 @@ func main() {
 	cmds.register("users", handlerUsers)
 	cmds.register("agg", handlerAggregator)
 	cmds.register("addfeed", addFeed)
+	cmds.register("feeds", handlerFeeds)
 
 	cmd := command{
 		name:      os.Args[1],  // command name
