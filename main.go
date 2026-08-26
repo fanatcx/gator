@@ -95,6 +95,45 @@ func addFeed(s *state, cmd command) error {
 
 }
 
+// indicates that a user is now following a feed. To add a feed use addFeed
+func handlerFollow(s *state, cmd command) error {
+	if len(cmd.arguments) == 1 {
+		feedURL := cmd.arguments[0]
+		
+		// current user
+		u, err := s.db.GetUser(context.Background(), s.cfg.CurrentUserName)
+		if err != nil {
+			return err
+		}
+		
+		// get feeds
+		feed, err := s.db.GetFeedByUrl(context.Background(), feedURL)
+		if err != nil {
+			return errors.New("feed not found. you can add a new feed with 'addfeed'")
+		}
+		
+		var feedFollowParams database.CreateFeedFollowParams
+		
+		feedFollowParams.CreatedAt = time.Now()
+		feedFollowParams.UpdatedAt = time.Now()
+		feedFollowParams.FeedID = feed.ID
+		feedFollowParams.UserID = u.ID
+		
+		row, err := s.db.CreateFeedFollow(context.Background(), feedFollowParams)
+		if err != nil {
+			return err
+		}
+		
+		fmt.Println(row.FeedName)
+		fmt.Println(row.UserName)
+		fmt.Println("-------------")
+
+		return nil
+	}
+	
+	return errors.New("invalid arguments passed as the follows handler expects a url argument")
+}
+
 func handlerLogin(s *state, cmd command) error {
 	if len(cmd.arguments) < 1 {
 		return errors.New("the login handler expects a username argument")
@@ -301,7 +340,7 @@ func main() {
 	cmds := commands{
 		command: make(map[string]func(*state, command) error),
 	}
-	// handler
+	// handlers
 	cmds.register("login", handlerLogin)
 	cmds.register("register", handlerRegister)
 	cmds.register("reset", handlerReset)
@@ -309,6 +348,7 @@ func main() {
 	cmds.register("agg", handlerAggregator)
 	cmds.register("addfeed", addFeed)
 	cmds.register("feeds", handlerFeeds)
+	cmds.register("follow", handlerFollow)
 
 	cmd := command{
 		name:      os.Args[1],  // command name
