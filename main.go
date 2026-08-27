@@ -21,26 +21,27 @@ import (
 
 // importing pq for side effects
 
+// repesents the state of our database / json file on disk through cfg
 type state struct {
 	cfg *config.Config
 	db  *database.Queries
 }
 
+// command holds the name of the command as arg1 and the arguments to that command
+// example: login chris <- CLI
+// name would be login and the argument is the user 'chris'
 type command struct {
-	// example: login command.
-	// Name would be login, argument should be the username (slice)
 	name      string
 	arguments []string
 }
 
-// displays all feeds
+// displays all RSS feeds
 func handlerFeeds(s *state, cmd command) error {
 	if len(cmd.arguments) == 0 {
 		f, err := s.db.DisplayFeeds(context.Background())
 		if err != nil {
 			return err
 		}
-		
 		for _, feed := range f {
 			u, err := s.db.GetUserById(context.Background(), feed.UserID)
 			if err != nil {
@@ -48,92 +49,128 @@ func handlerFeeds(s *state, cmd command) error {
 			}
 			fmt.Println(feed.Name)
 			fmt.Println(feed.Url)
-			fmt.Printf("created by user: %s\n", u.Name) // add feed user with sql 
+			fmt.Printf("created by user: %s\n", u.Name)
 			fmt.Println("------")
 			
 		}
 		return nil
-		
 	}
-	return errors.New("invalid arguments passed! 'feeds' takes no aruguments")
-	
+	return errors.New("invalid arguments passed! 'feeds' takes no aruguments")	
 }
 
+// helper function that bridges a user id and a feed id -> creates a feed-follow row
+func createFollow(s *state, userID, feedID uuid.UUID) (database.CreateFeedFollowRow, error) {
+    now := time.Now()
+    return s.db.CreateFeedFollow(context.Background(), database.CreateFeedFollowParams{
+        CreatedAt: now,
+        UpdatedAt: now,
+        UserID:    userID,
+        FeedID:    feedID,
+    })
+}
+
+// creates a feed for the current user
 func addFeed(s *state, cmd command) error {
-	// check number of arguments
 	if len(cmd.arguments) == 2 {
 		var feedInfo database.CreateFeedParams
-
-		user, err := s.db.GetUser(context.Background(), s.cfg.CurrentUserName)
+		currentUserName := s.cfg.CurrentUserName
+		
+		user, err := s.db.GetUser(context.Background(), currentUserName)
 		if err != nil {
 			return err
 		}
-
+		
+		// supplied by cli <==
 		feedName := cmd.arguments[0]
 		url := cmd.arguments[1]
-		//rss, err := fetchFeed(context.Background(), url)
-
-		// NOTE: each "feed" has its own uuid auto generated
+		
+		// NOTE: each "feed" has its own uuid auto generated (check sql schemas)
 		feedInfo.CreatedAt = time.Now()
 		feedInfo.Name = feedName
 		feedInfo.Url = url
 		feedInfo.UserID = user.ID
-		feedInfo.UpdatedAt = time.Now()
-
-		f, err := s.db.CreateFeed(context.Background(), feedInfo)
+		
+		// creates a feed off the info. Not to be confused with 'following' a feed ..
+		feed, err := s.db.CreateFeed(context.Background(), feedInfo)
+		if err != nil {
+			return fmt.Errorf("failed to create feed %w", err)
+		}
+		// actual record data
+		feedFollowRow, err := createFollow(s, user.ID, feed.ID)
 		if err != nil {
 			return err
 		}
-
-		// print object to console
-		fmt.Printf("'%s'\n", f.Name)
-		fmt.Printf("'%s'\n", f.Url)
-		return nil
-
-	}
-	return errors.New("invalid amount of arguments passed to addfeed. Provide a name and url for the feed")
-
-}
-
-// indicates that a user is now following a feed. To add a feed use addFeed
-func handlerFollow(s *state, cmd command) error {
-	if len(cmd.arguments) == 1 {
-		feedURL := cmd.arguments[0]
+		fmt.Printf("'%s'\n", feedFollowRow.FeedName)
+		fmt.Printf("'%s'\n", feedFollowRow.UserName)
 		
-		// current user
-		u, err := s.db.GetUser(context.Background(), s.cfg.CurrentUserName)
-		if err != nil {
-			return err
-		}
-		
-		// get feeds
-		feed, err := s.db.GetFeedByUrl(context.Background(), feedURL)
-		if err != nil {
-			return errors.New("feed not found. you can add a new feed with 'addfeed'")
-		}
-		
-		var feedFollowParams database.CreateFeedFollowParams
-		
-		feedFollowParams.CreatedAt = time.Now()
-		feedFollowParams.UpdatedAt = time.Now()
-		feedFollowParams.FeedID = feed.ID
-		feedFollowParams.UserID = u.ID
-		
-		row, err := s.db.CreateFeedFollow(context.Background(), feedFollowParams)
-		if err != nil {
-			return err
-		}
-		
-		fmt.Println(row.FeedName)
-		fmt.Println(row.UserName)
-		fmt.Println("-------------")
-
 		return nil
 	}
 	
-	return errors.New("invalid arguments passed as the follows handler expects a url argument")
+	return errors.New("invalid amount of arguments passed to addfeed. Provide a name and url for the feed")
 }
 
+// allows the current user to follow a feed. EXAMPLE: 'follow' 'http://www.randomRSS.com'
+func handlerFollow(s *state, cmd command) error {
+	if len(cmd.arguments) == 1 {
+		// feed url is supplied by user in the CLI
+		feedURL := cmd.arguments[0]
+		// one feed per url NO duplicate feeds
+		feed, err := s.db.GetFeedByUrl(context.Background(), feedURL)
+		if err != nil {
+			return fmt.Errorf("could not get feed by specified url")
+		}
+		
+		// get CURRENT user
+		u, err := s.db.GetUser(context.Background(), s.cfg.CurrentUserName)
+		if err != nil {
+			return err 
+		}
+		
+		// create the basic params params
+		var params database.CreateFeedFollowParams
+		params.CreatedAt = time.Now()
+		params.FeedID = feed.ID
+		params.UserID = u.ID
+		params.UpdatedAt = time.Now()
+		// FULL params, a feed follow 'record'
+		r, err := s.db.CreateFeedFollow(context.Background(), params)
+		if err != nil {
+			return errors.New("failed to create proper feed follow record")
+		}
+		
+		fmt.Printf("feed: '%s'\nuser: %s\n", r.FeedName, r.UserName)
+		return nil
+	}
+	return errors.New("invalid arguments passed as the follows handler expects a url argument")
+	
+}
+
+// shows all the feeds the current logged in user is following
+func handlerFollowing(s *state, cmd command) error {
+	if len(cmd.arguments) == 0 {
+		currentUserName := s.cfg.CurrentUserName
+		user, err := s.db.GetUser(context.Background(), currentUserName)
+		if err != nil {
+			return err
+		}
+		
+		feedFollows, err := s.db.GetFeedFollowsForUser(context.Background(), user.ID)
+		if err != nil {
+			return err
+		}
+
+		fmt.Printf("user %s is currently following...\n", currentUserName)
+		for _, f := range feedFollows {
+			fmt.Printf("\t%s\n", f.FeedName)
+		}
+		
+		return nil
+		
+	}
+	return errors.New("current command does not take any arguments")
+}
+
+// 'login' -> (user). Gets the user logged in from the cli, takes 1 argument as the user to log in as
 func handlerLogin(s *state, cmd command) error {
 	if len(cmd.arguments) < 1 {
 		return errors.New("the login handler expects a username argument")
@@ -151,18 +188,20 @@ func handlerLogin(s *state, cmd command) error {
 	return nil
 }
 
+// pulls rss feed data. URL pre set for now
 func handlerAggregator(s *state, cmd command) error {
 	url := "https://www.wagslane.dev/index.xml"
+	
 	rss, err := fetchFeed(context.Background(), url)
 	if err != nil {
 		return err
 	}
-
+	
 	fmt.Println(rss)
-
 	return nil
 }
 
+// registers a user before logging in, must take at least 1 argument to create the user. The desired username
 func handlerRegister(s *state, cmd command) error {
 	if len(cmd.arguments) == 0 {
 		return errors.New("username not supplied as an argument after command")
@@ -170,8 +209,6 @@ func handlerRegister(s *state, cmd command) error {
 
 	// check if user exists ->
 	_, err := s.db.GetUser(context.Background(), cmd.arguments[0])
-
-	// not found, new user needed
 	if err != nil {
 		// create user
 		u, err := s.db.CreateUser(context.Background(), database.CreateUserParams{
@@ -187,51 +224,50 @@ func handlerRegister(s *state, cmd command) error {
 		if err = s.cfg.SetUser(u.Name); err != nil {
 			return err
 		}
-
 		fmt.Printf("user: '%v' created successfully at %v and updated at %v. Current uuid: %v\n",
 			u.Name,
 			u.CreatedAt,
 			u.UpdatedAt,
 			u.ID)
-
+		
 		return nil
 	}
 
 	return errors.New("user already exists")
 }
 
+// completely resets and wipes the database
 func handlerReset(s *state, cmd command) error {
 	if err := s.db.DeleteUsers(context.Background()); err != nil {
 		return fmt.Errorf("resetting database: %w", err)
 	}
-
 	fmt.Println("database has been successfully reset")
-
 	return nil
 }
 
+// shows all the user account names
 func handlerUsers(s *state, cmd command) error {
 	users, err := s.db.GetUsers(context.Background())
-
 	if err != nil {
 		return fmt.Errorf("unable to retrieve users: %w", err)
 	}
+	
 	for _, u := range users {
 		if s.cfg.CurrentUserName == u {
 			fmt.Printf("%s (current)\n", u)
 			continue
 		}
-
 		fmt.Println(u)
 	}
-
 	return nil
+	
 }
 
+// map used to store the state of the program and the commands supplied by the user through the CLI
 type commands struct {
 	command map[string]func(*state, command) error
 }
-
+// runs the commands and calls the handlers
 func (c *commands) run(s *state, cmd command) error {
 	valFunc, exists := c.command[cmd.name]
 	if !exists {
@@ -245,6 +281,7 @@ func (c *commands) run(s *state, cmd command) error {
 	return nil
 }
 
+// registers a new command (used in main)
 func (c *commands) register(name string, f func(*state, command) error) {
 	c.command[name] = f // assign to map
 }
@@ -265,6 +302,7 @@ type RSSItem struct {
 	PubDate     string `xml:"pubDate"`
 }
 
+// creates a network request and returns an RSSFeed object or an error
 func fetchFeed(ctx context.Context, feedURL string) (*RSSFeed, error) {
 	var rss RSSFeed
 	client := http.Client{Timeout: 30 * time.Second}
@@ -294,19 +332,19 @@ func fetchFeed(ctx context.Context, feedURL string) (*RSSFeed, error) {
 	if err := xml.Unmarshal(data, &rss); err != nil {
 		return nil, fmt.Errorf("could not unmarshal: %w", err)
 	}
-
-	// unescape
+	
+	// unescape html
 	rss.Channel.Title = html.UnescapeString(rss.Channel.Title)
 	rss.Channel.Description = html.UnescapeString(rss.Channel.Description)
 	for i, item := range rss.Channel.Item {
 		rss.Channel.Item[i].Title = html.UnescapeString(item.Title)
 		rss.Channel.Item[i].Description = html.UnescapeString(item.Description)
 	}
+	
 	return &rss, nil
 }
 
-
-
+//===============//
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Println("Error, not enough arguments. Please type a command.")
@@ -349,6 +387,7 @@ func main() {
 	cmds.register("addfeed", addFeed)
 	cmds.register("feeds", handlerFeeds)
 	cmds.register("follow", handlerFollow)
+	cmds.register("following", handlerFollowing)
 
 	cmd := command{
 		name:      os.Args[1],  // command name
@@ -361,3 +400,4 @@ func main() {
 	}
 
 }
+//===============// MAYBE ITS TIME TO HAVE MULTIPLE FILES.

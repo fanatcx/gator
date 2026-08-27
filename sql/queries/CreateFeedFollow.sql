@@ -18,8 +18,8 @@ INNER JOIN users ON users.id = inserted_feed_follow.user_id;
 
 -- name: GetFeedFollowsForUser :many
 SELECT feed_follows.*,
-    feed_follows.id AS feed_id,
-    feed_follows.user_id AS user_id
+    feeds.name AS feed_name,
+    users.name AS user_name 
 FROM feed_follows
 INNER JOIN feeds ON feeds.id = feed_follows.feed_id
 INNER JOIN users ON users.id = feed_follows.user_id
